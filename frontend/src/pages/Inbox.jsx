@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { useAuth, API_BASE } from '../context/AuthContext';
+import { useAuth, API_BASE, getMediaUrl } from '../context/AuthContext';
 import { Plus, Users, Trash2, Send, Edit2, CheckCheck, Check, Smile, Loader2, ArrowLeft, X } from 'lucide-react';
 
 export default function Inbox() {
@@ -9,6 +9,8 @@ export default function Inbox() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const activeRoomId = searchParams.get('room');
+  
+  const wsRef = useRef(null);
 
   // Lists
   const [conversations, setConversations] = useState([]);
@@ -85,12 +87,45 @@ export default function Inbox() {
   useEffect(() => {
     if (activeRoomId) {
       fetchRoom(activeRoomId);
+      
+      // Establish real-time WebSocket connection
+      const baseWs = API_BASE.replace('https://', 'wss://').replace('http://', 'ws://');
+      const wsUrl = `${baseWs}/api/messages/ws/${activeRoomId}?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'new_message') {
+            setMessages(prev => {
+              // Prevent duplication
+              if (prev.some(m => m.id === data.message.id)) return prev;
+              return [...prev, data.message];
+            });
+            fetchInbox(); // Refresh sidebar conversation orders
+          }
+        } catch (err) {
+          console.error("WebSocket message parsing error:", err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket connection closed");
+      };
     } else {
       setActiveConvo(null);
       setMessages([]);
       setOtherUser(null);
     }
-  }, [activeRoomId]);
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [activeRoomId, token]);
 
   useEffect(() => {
     scrollToBottom();
@@ -242,9 +277,35 @@ export default function Inbox() {
     }
   };
 
+  const getSenderAvatar = (senderId) => {
+    if (senderId === user?.id) {
+      return user?.profile?.avatar;
+    }
+    const p = participants.find(part => part.id === senderId);
+    return p?.avatar;
+  };
+
+  const getSenderUsername = (senderId) => {
+    if (senderId === user?.id) {
+      return user?.username;
+    }
+    const p = participants.find(part => part.id === senderId);
+    return p?.username || "Unknown";
+  };
+
   const formatMsgDate = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!dateStr) return '';
+    let formattedStr = dateStr;
+    if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      formattedStr = dateStr + 'Z';
+    }
+    const d = new Date(formattedStr);
+    return d.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   return (
@@ -293,9 +354,19 @@ export default function Inbox() {
                       isActive ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-l-4 border-indigo-600' : ''
                     }`}
                   >
-                    {/* Avatar Letter */}
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-base shadow-sm shrink-0">
-                      {convo.avatar_letter}
+                    {/* Avatar Image or Letter */}
+                    <div className="w-11 h-11 rounded-full overflow-hidden shrink-0 shadow-sm ring-1 ring-slate-100 dark:ring-slate-800/40">
+                      {!convo.is_group && convo.participants?.length > 0 && convo.participants[0].avatar ? (
+                        <img 
+                          src={getMediaUrl(convo.participants[0].avatar)} 
+                          alt={convo.title} 
+                          className="w-full h-full object-cover" 
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-base">
+                          {convo.avatar_letter}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0">
@@ -351,8 +422,18 @@ export default function Inbox() {
                     <ArrowLeft className="w-5 h-5" />
                   </button>
 
-                  <div className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-sm shrink-0">
-                    {activeConvo.is_group ? "G" : otherUser?.username.slice(0, 1).toUpperCase()}
+                  <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 shadow-sm ring-1 ring-slate-100 dark:ring-slate-800/40">
+                    {!activeConvo.is_group && otherUser?.avatar ? (
+                      <img 
+                        src={getMediaUrl(otherUser.avatar)} 
+                        alt={otherUser.username} 
+                        className="w-full h-full object-cover" 
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-indigo-600 text-white flex items-center justify-center font-bold text-sm">
+                        {activeConvo.is_group ? "G" : otherUser?.username.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -371,7 +452,23 @@ export default function Inbox() {
                     messages.map((msg) => {
                       const isMe = msg.sender_id === user?.id;
                       return (
-                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}>
+                        <div key={msg.id} className={`flex gap-3 items-end ${isMe ? 'justify-end' : 'justify-start'} group`}>
+                          {!isMe && (
+                            <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 ring-1 ring-slate-100 dark:ring-slate-800/40">
+                              {getSenderAvatar(msg.sender_id) ? (
+                                <img 
+                                  src={getMediaUrl(getSenderAvatar(msg.sender_id))} 
+                                  alt={msg.sender_username} 
+                                  className="w-full h-full object-cover" 
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center font-bold text-xs uppercase">
+                                  {getSenderUsername(msg.sender_id).slice(0, 1)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
                           <div className="flex flex-col max-w-[70%] gap-1">
                             {!isMe && activeConvo.is_group && (
                               <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 pl-2">@{msg.sender_username}</span>
@@ -385,14 +482,13 @@ export default function Inbox() {
                               }`}
                             >
                               <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                              
-                              <div className="flex items-center justify-end gap-1.5 mt-1.5">
+                                                           <div className="flex items-center justify-end gap-1.5 mt-1.5">
                                 <span className={`text-[8px] ${isMe ? 'text-indigo-200 dark:text-indigo-300' : 'text-slate-400 dark:text-slate-500'}`}>
                                   {formatMsgDate(msg.created_at)}
                                 </span>
                                 {isMe && (
                                   msg.is_read ? (
-                                    <CheckCheck className="w-3 h-3 text-indigo-205" />
+                                    <CheckCheck className="w-3 h-3 text-indigo-200" />
                                   ) : (
                                     <Check className="w-3 h-3 text-indigo-300" />
                                   )
@@ -419,6 +515,22 @@ export default function Inbox() {
                               </div>
                             )}
                           </div>
+                          
+                          {isMe && (
+                            <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 ring-1 ring-indigo-500/20">
+                              {getSenderAvatar(msg.sender_id) ? (
+                                <img 
+                                  src={getMediaUrl(getSenderAvatar(msg.sender_id))} 
+                                  alt="Me" 
+                                  className="w-full h-full object-cover" 
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs uppercase">
+                                  {getSenderUsername(msg.sender_id).slice(0, 1)}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -500,8 +612,18 @@ export default function Inbox() {
                         onChange={() => handleToggleFriendSelect(f.id)}
                         className="rounded text-indigo-600 focus:ring-indigo-500 accent-indigo-600"
                       />
-                      <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
-                        {f.username.slice(0, 1).toUpperCase()}
+                      <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 ring-1 ring-slate-100 dark:ring-slate-800/40">
+                        {f.avatar ? (
+                          <img 
+                            src={getMediaUrl(f.avatar)} 
+                            alt={f.username} 
+                            className="w-full h-full object-cover" 
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                            {f.username.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
                       </div>
                       <span className="text-slate-700 dark:text-slate-300 text-xs font-semibold">@{f.username}</span>
                     </label>
@@ -576,8 +698,18 @@ export default function Inbox() {
                         onClick={() => handleStartDM(u.username)}
                         className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-150/40 dark:hover:border-slate-800 cursor-pointer transition-all"
                       >
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm">
-                          {u.username.slice(0, 1).toUpperCase()}
+                        <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 shadow-sm ring-1 ring-slate-100 dark:ring-slate-800/40">
+                          {u.avatar ? (
+                            <img 
+                              src={getMediaUrl(u.avatar)} 
+                              alt={u.username} 
+                              className="w-full h-full object-cover" 
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-xs">
+                              {u.username.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-slate-700 dark:text-slate-200 text-xs font-bold truncate">@{u.username}</p>
@@ -596,8 +728,18 @@ export default function Inbox() {
                       onClick={() => handleStartDM(u.username)}
                       className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white dark:hover:bg-slate-900 border border-transparent hover:border-slate-150/40 dark:hover:border-slate-800 cursor-pointer transition-all"
                     >
-                      <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
-                        {u.username.slice(0, 1).toUpperCase()}
+                      <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 shadow-sm ring-1 ring-slate-100 dark:ring-slate-800/40">
+                        {u.avatar ? (
+                          <img 
+                            src={getMediaUrl(u.avatar)} 
+                            alt={u.username} 
+                            className="w-full h-full object-cover" 
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs">
+                            {u.username.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-slate-700 dark:text-slate-300 text-xs font-semibold truncate">@{u.username}</p>

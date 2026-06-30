@@ -187,7 +187,7 @@ class Like(MongoModelBase):
 
 class Conversation(MongoModelBase):
     __tablename__ = "conversations"
-    _fields = ["id", "name", "is_group", "created_at", "participant_ids"]
+    _fields = ["id", "name", "is_group", "created_at", "participant_ids", "creator_id"]
     _defaults = {
         "is_group": False,
         "created_at": datetime.datetime.utcnow
@@ -198,6 +198,7 @@ class Conversation(MongoModelBase):
     is_group = Field("is_group")
     created_at = Field("created_at")
     participant_ids = Field("participant_ids")
+    creator_id = Field("creator_id")
 
     participants = RelationshipField("participant_ids")
 

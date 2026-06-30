@@ -30,8 +30,20 @@ export default function CommentModal({ post, onClose, onCommentAdded }) {
   };
 
   const formatDate = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    if (!dateStr) return '';
+    let formattedStr = dateStr;
+    if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      formattedStr = dateStr + 'Z';
+    }
+    const d = new Date(formattedStr);
+    return d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   return (

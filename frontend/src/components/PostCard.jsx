@@ -28,10 +28,53 @@ export default function PostCard({ post, onUpdate, onCommentClick }) {
     }
   };
 
-  const handleShare = () => {
+  const copyFallback = (text) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      alert("Post link copied to clipboard!");
+    } catch (err) {
+      console.error('Fallback copy failed', err);
+    }
+    document.body.removeChild(textArea);
+  };
+
+  const handleShare = async () => {
     const shareUrl = `${window.location.origin}/post/${post.id}`;
-    navigator.clipboard.writeText(shareUrl);
-    alert("Post link copied to clipboard!");
+    const shareData = {
+      title: 'CollegeConnectX Post',
+      text: post.text || 'Check out this post on CollegeConnectX!',
+      url: shareUrl
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        } else {
+          return; // User aborted share dialog
+        }
+      }
+    }
+
+    // Fallback to copying link
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(shareUrl)
+        .then(() => alert("Post link copied to clipboard!"))
+        .catch(() => copyFallback(shareUrl));
+    } else {
+      copyFallback(shareUrl);
+    }
   };
 
   const handleDelete = async () => {
@@ -65,8 +108,20 @@ export default function PostCard({ post, onUpdate, onCommentClick }) {
 
   // Helper to format date
   const formatDate = (dateStr) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    if (!dateStr) return '';
+    let formattedStr = dateStr;
+    if (!dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      formattedStr = dateStr + 'Z';
+    }
+    const d = new Date(formattedStr);
+    return d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
   };
 
   return (

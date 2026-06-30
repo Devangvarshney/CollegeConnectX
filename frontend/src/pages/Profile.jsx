@@ -5,7 +5,7 @@ import RightPanel from '../components/RightPanel';
 import PostCard from '../components/PostCard';
 import CommentModal from '../components/CommentModal';
 import { useAuth, API_BASE, getMediaUrl } from '../context/AuthContext';
-import { MapPin, Calendar, Edit3, ArrowLeft, Loader2, Sparkles, Plus, Check, LogOut } from 'lucide-react';
+import { MapPin, Calendar, Edit3, ArrowLeft, Loader2, Sparkles, Plus, Check, LogOut, X } from 'lucide-react';
 
 export default function Profile() {
   const { username } = useParams();
@@ -15,6 +15,11 @@ export default function Profile() {
   const [profileData, setProfileData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeCommentPost, setActiveCommentPost] = useState(null);
+  
+  // Followers/Following modal state
+  const [activeStatsModal, setActiveStatsModal] = useState(null); // 'followers', 'following', or null
+  const [statsModalUsers, setStatsModalUsers] = useState([]);
+  const [loadingStats, setLoadingStats] = useState(false);
   
   // Edit Profile overlay state
   const [isEditing, setIsEditing] = useState(false);
@@ -43,6 +48,23 @@ export default function Profile() {
       console.error("Error fetching profile:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenStatsModal = async (type) => {
+    setActiveStatsModal(type);
+    setLoadingStats(true);
+    setStatsModalUsers([]);
+    try {
+      const res = await apiCall(`/api/users/${type}/${username}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStatsModalUsers(data);
+      }
+    } catch (err) {
+      console.error(`Error fetching ${type}:`, err);
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -138,7 +160,7 @@ export default function Profile() {
             <span className="text-sm">Loading user profile...</span>
           </div>
         </main>
-        <RightPanel />
+        <RightPanel onFollowToggle={fetchProfile} />
       </div>
     );
   }
@@ -264,10 +286,10 @@ export default function Profile() {
 
               {/* Stats */}
               <div className="flex gap-4 mt-3 text-sm text-slate-700 dark:text-slate-400">
-                <span className="hover:underline cursor-pointer">
+                <span onClick={() => handleOpenStatsModal('following')} className="hover:underline cursor-pointer">
                   <strong className="font-bold text-slate-800 dark:text-slate-100">{profileData.following_count}</strong> Following
                 </span>
-                <span className="hover:underline cursor-pointer">
+                <span onClick={() => handleOpenStatsModal('followers')} className="hover:underline cursor-pointer">
                   <strong className="font-bold text-slate-800 dark:text-slate-100">{profileData.followers_count}</strong> Followers
                 </span>
               </div>
@@ -301,7 +323,7 @@ export default function Profile() {
       </main>
 
       {/* Right widgets panel */}
-      <RightPanel />
+      <RightPanel onFollowToggle={fetchProfile} />
 
       {/* Edit Profile Modal */}
       {isEditing && (
@@ -387,6 +409,66 @@ export default function Profile() {
           onClose={() => setActiveCommentPost(null)}
           onCommentAdded={refreshActiveCommentPost}
         />
+      )}
+
+      {/* Followers / Following Modal */}
+      {activeStatsModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 dark:border-slate-800 flex flex-col gap-4 animate-fade-in">
+            <div className="flex justify-between items-center border-b border-slate-50 dark:border-slate-800/60 pb-2">
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-base capitalize">
+                {activeStatsModal}
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setActiveStatsModal(null)}
+                className="p-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-805 text-slate-400 dark:text-slate-550"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto min-h-24 flex flex-col gap-2">
+              {loadingStats ? (
+                <div className="flex items-center justify-center flex-1 py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                </div>
+              ) : statsModalUsers.length > 0 ? (
+                statsModalUsers.map((u) => (
+                  <div 
+                    key={u.id}
+                    onClick={() => {
+                      setActiveStatsModal(null);
+                      navigate(`/profile/${u.username}`);
+                    }}
+                    className="flex items-center gap-3.5 p-2 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-850/60 cursor-pointer transition-all"
+                  >
+                    <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 ring-1 ring-slate-100 dark:ring-slate-800/40">
+                      {u.avatar ? (
+                        <img 
+                          src={getMediaUrl(u.avatar)} 
+                          alt={u.username} 
+                          className="w-full h-full object-cover" 
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm uppercase">
+                          {u.username.slice(0, 1)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-slate-850 dark:text-slate-205 text-xs font-bold truncate">@{u.username}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-10 text-slate-400 dark:text-slate-500 text-xs italic">
+                  No {activeStatsModal} found.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

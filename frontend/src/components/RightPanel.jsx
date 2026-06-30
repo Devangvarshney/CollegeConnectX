@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, UserPlus, Check, Flame, Trophy } from 'lucide-react';
 import { useAuth, API_BASE, getMediaUrl } from '../context/AuthContext';
 
-export default function RightPanel({ onSearch }) {
+export default function RightPanel({ onSearch, onFollowToggle }) {
   const { token, apiCall } = useAuth();
   const [suggestions, setSuggestions] = useState([]);
   const [searchVal, setSearchVal] = useState('');
@@ -32,9 +32,8 @@ export default function RightPanel({ onSearch }) {
       if (res.ok) {
         // Remove user from suggestions list
         setSuggestions(prev => prev.filter(u => u.username !== username));
-        // If profile details page is open, let's refresh or rely on their state
-        if (onSearch) {
-          onSearch(); // Refresh parent if needed
+        if (onFollowToggle) {
+          onFollowToggle(username);
         }
       }
     } catch (err) {
@@ -62,7 +61,9 @@ export default function RightPanel({ onSearch }) {
           placeholder="Search Campus Feed..."
           className="w-full pl-11 pr-4 py-3 rounded-2xl text-sm glass-input"
         />
-        <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+        <button type="submit" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors">
+          <Search className="w-5 h-5" />
+        </button>
       </form>
 
       {/* Premium Subscription */}

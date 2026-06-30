@@ -6,7 +6,7 @@ import PostCard from '../components/PostCard';
 import CommentModal from '../components/CommentModal';
 import { useAuth, API_BASE, getMediaUrl } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { Image, Video, Send, Loader2, Sparkles } from 'lucide-react';
+import { Image, Video, Send, Loader2, Moon, Sun } from 'lucide-react';
 
 export default function Home() {
   const { user, token, apiCall } = useAuth();
@@ -148,7 +148,11 @@ export default function Home() {
             className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-900 transition-all duration-300 group"
             title="Toggle Theme"
           >
-            <Sparkles className="w-5 h-5 text-indigo-500 group-hover:text-indigo-600 dark:text-amber-400 dark:group-hover:text-amber-300 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110 active:scale-95" />
+            {theme === 'dark' ? (
+              <Sun className="w-5 h-5 text-amber-500 group-hover:text-amber-600 transition-transform duration-500 group-hover:rotate-45 group-hover:scale-110 active:scale-95" />
+            ) : (
+              <Moon className="w-5 h-5 text-slate-700 hover:text-indigo-650 transition-transform duration-500 group-hover:-rotate-12 group-hover:scale-110 active:scale-95" />
+            )}
           </button>
         </div>
 

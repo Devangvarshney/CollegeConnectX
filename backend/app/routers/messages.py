@@ -1,8 +1,36 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models, schemas, auth
+
+class ConnectionManager:
+    def __init__(self):
+        # Maps convo_id -> list of WebSockets
+        self.active_connections = {}
+
+    async def connect(self, websocket: WebSocket, convo_id: int):
+        await websocket.accept()
+        if convo_id not in self.active_connections:
+            self.active_connections[convo_id] = []
+        self.active_connections[convo_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, convo_id: int):
+        if convo_id in self.active_connections:
+            if websocket in self.active_connections[convo_id]:
+                self.active_connections[convo_id].remove(websocket)
+            if not self.active_connections[convo_id]:
+                del self.active_connections[convo_id]
+
+    async def broadcast(self, convo_id: int, message: dict):
+        if convo_id in self.active_connections:
+            for connection in self.active_connections[convo_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
+
+manager = ConnectionManager()
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
@@ -112,16 +140,18 @@ def get_or_create_dm(
         raise HTTPException(status_code=400, detail="Cannot DM yourself")
 
     # Find existing direct conversation between current_user and other_user
-    # We query conversations where both are participants and is_group=False
-    convo = db.query(models.Conversation).filter(
-        models.Conversation.is_group == False,
-        models.Conversation.participants.any(id=current_user.id),
-        models.Conversation.participants.any(id=other_user.id)
-    ).first()
+    # by checking participant_ids list to prevent duplicates
+    convo = None
+    all_convos = db.query(models.Conversation).filter(models.Conversation.is_group == False).all()
+    for c in all_convos:
+        ids = c.participant_ids or []
+        if current_user.id in ids and other_user.id in ids:
+            convo = c
+            break
 
     if not convo:
         # Create a new conversation
-        convo = models.Conversation(is_group=False)
+        convo = models.Conversation(is_group=False, creator_id=current_user.id)
         db.add(convo)
         db.commit()
         db.refresh(convo)
@@ -235,6 +265,30 @@ def send_message(
     db.commit()
     db.refresh(new_msg)
 
+    # Broadcast to WebSocket clients in the background
+    payload = {
+        "type": "new_message",
+        "message": {
+            "id": new_msg.id,
+            "conversation_id": new_msg.conversation_id,
+            "sender_id": new_msg.sender_id,
+            "text": new_msg.text,
+            "is_read": new_msg.is_read,
+            "created_at": new_msg.created_at.isoformat(),
+            "sender_username": current_user.username
+        }
+    }
+    
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.run_coroutine_threadsafe(manager.broadcast(convo_id, payload), loop)
+        else:
+            asyncio.run(manager.broadcast(convo_id, payload))
+    except Exception as e:
+        print("WS Broadcast from REST failed:", e)
+
     return schemas.MessageOut(
         id=new_msg.id,
         conversation_id=new_msg.conversation_id,
@@ -244,6 +298,84 @@ def send_message(
         created_at=new_msg.created_at,
         sender_username=current_user.username
     )
+
+@router.websocket("/ws/{convo_id}")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    convo_id: int,
+    token: Optional[str] = None
+):
+    from ..database import SessionLocal
+    db = SessionLocal()
+    
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        db.close()
+        return
+
+    try:
+        user = auth.get_current_user(token, db)
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        db.close()
+        return
+
+    # Verify participant of convo_id
+    convo = db.query(models.Conversation).filter(models.Conversation.id == convo_id).first()
+    if not convo:
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        db.close()
+        return
+
+    is_part = db.query(models.Conversation).filter(
+        models.Conversation.id == convo_id,
+        models.Conversation.participants.any(id=user.id)
+    ).first()
+    
+    if not is_part:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        db.close()
+        return
+
+    # Add to manager
+    await manager.connect(websocket, convo_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            import json
+            try:
+                msg_data = json.loads(data)
+                text = msg_data.get("text", "").strip()
+                if text:
+                    new_msg = models.Message(
+                        conversation_id=convo_id,
+                        sender_id=user.id,
+                        text=text
+                    )
+                    db.add(new_msg)
+                    db.commit()
+                    db.refresh(new_msg)
+                    
+                    # Broadcast
+                    payload = {
+                        "type": "new_message",
+                        "message": {
+                            "id": new_msg.id,
+                            "conversation_id": new_msg.conversation_id,
+                            "sender_id": new_msg.sender_id,
+                            "text": new_msg.text,
+                            "is_read": new_msg.is_read,
+                            "created_at": new_msg.created_at.isoformat(),
+                            "sender_username": user.username
+                        }
+                    }
+                    await manager.broadcast(convo_id, payload)
+            except Exception as e:
+                print("WS Parse Error:", e)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, convo_id)
+    finally:
+        db.close()
 
 @router.post("/room/{convo_id}/read")
 def mark_read(
@@ -352,7 +484,6 @@ def create_group_chat(
         raise HTTPException(status_code=400, detail="Must select at least one mutual friend")
 
     # Verify that selected users are mutual friends
-    # follows_me
     follows_me_ids = db.query(models.Follower.user_id).filter(
         models.Follower.followed_id == current_user.id
     ).all()
@@ -370,8 +501,20 @@ def create_group_chat(
     if len(valid_user_ids) < 1:
          raise HTTPException(status_code=400, detail="Select mutual friends only")
 
+    # Enforce only one group with a specific name per user creator
+    existing_groups = db.query(models.Conversation).filter(
+        models.Conversation.is_group == True,
+        models.Conversation.creator_id == current_user.id
+    ).all()
+    for g in existing_groups:
+        if g.name and g.name.strip().lower() == name.lower():
+            raise HTTPException(
+                status_code=400, 
+                detail=f"You have already created a group named '{name}'"
+            )
+
     # Create Group Conversation
-    convo = models.Conversation(name=name, is_group=True)
+    convo = models.Conversation(name=name, is_group=True, creator_id=current_user.id)
     db.add(convo)
     db.commit()
     db.refresh(convo)

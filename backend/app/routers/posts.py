@@ -27,11 +27,9 @@ def get_posts(
         query = query.outerjoin(models.User, models.Tweet.user_id == models.User.id)\
                      .outerjoin(models.Comment, models.Comment.tweet_id == models.Tweet.id)\
                      .filter(
-                         or_(
-                             models.Tweet.text.icontains(q),
-                             models.User.username.icontains(q),
-                             models.Comment.text.icontains(q)
-                         )
+                          models.Tweet.text.icontains(q) |
+                          models.User.username.icontains(q) |
+                          models.Comment.text.icontains(q)
                      ).distinct()
                      
     # Order by newest
