@@ -9,7 +9,9 @@ export const getMediaUrl = (path) => {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-  return `${API_BASE}${path}`;
+  const base = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE;
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
 };
 
 export const AuthProvider = ({ children }) => {
@@ -19,7 +21,9 @@ export const AuthProvider = ({ children }) => {
 
   // Helper for all authenticated API requests
   const apiCall = async (endpoint, options = {}) => {
-    const url = `${API_BASE}${endpoint}`;
+    const base = API_BASE.endsWith('/') ? API_BASE.slice(0, -1) : API_BASE;
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const url = `${base}${cleanEndpoint}`;
     
     // Setup headers
     const headers = options.headers || {};
