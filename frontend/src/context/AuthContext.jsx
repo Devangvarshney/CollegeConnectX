@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
 
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const rawBase = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+export const API_BASE = rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
 
 export const getMediaUrl = (path) => {
   if (!path) return '';
