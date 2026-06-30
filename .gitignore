@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+**/__pycache__/
+**/*.py[cod]
+
+# Virtual environments
+env/
+venv/
+ENV/
+.env
+backend/.env
+frontend/.env
+
+# Database files
+*.db
+*.sqlite3
+collegeconnectx.db
+
+# Cloudinary & Local media uploads
+media/
+backend/media/
+media/*
+backend/media/*
+
+# Logs
+*.log
+otp_emails.log
+backend/otp_emails.log
+logs/
+
+# Frontend dependencies and builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
